@@ -70,6 +70,13 @@ bash -n scripts/cloudflare-relay-mode.sh scripts/compare-cloudflare-relay-latenc
 cargo test && cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && python3 scripts/test_support_scripts.py && python3 -m py_compile scripts/measure-relay-ws-latency.py scripts/test_support_scripts.py && bash -n scripts/cloudflare-relay-mode.sh scripts/compare-cloudflare-relay-latency.sh scripts/install-vps.sh
 ```
 
+## Release Maintenance
+
+- For v0.1.0, GitHub release assets are precompiled tarballs named `orca-relay-v0.1.0-<target>.tar.gz`.
+- Each tarball must contain exactly the three release binaries: `orca-relay`, `orca-relay-proxy`, and `orca-relay-bridge`.
+- After `cargo build --release`, use `scripts/package-release.sh` to package built binaries and checksums for upload.
+- Installer flows should download GitHub release assets by tag; verify checksums before use and never upload `target/`, secrets, tokens, pairing material, or filled env files.
+
 ## Usage Examples
 
 Use placeholders only. Do not paste real relay tokens, pairing codes, `deviceToken`, `publicKeyB64`, Cloudflare credentials, VPS IPs, or private endpoints into prompts, commits, logs, issues, or screenshots.
@@ -140,6 +147,13 @@ orca-relay rewrite-pairing-code \
 ```
 
 The helper rewrites only the endpoint, preserves `deviceToken` and `publicKeyB64`, and validates pairing payload version `2`.
+
+## Release Maintenance
+
+- For v0.1.0, GitHub release assets are precompiled tarballs named `orca-relay-v0.1.0-<target>.tar.gz`.
+- Each tarball should contain `orca-relay`, `orca-relay-proxy`, and `orca-relay-bridge`; `scripts/package-release.sh` also includes the English and Chinese README files for convenience.
+- Build release binaries with an explicit target such as `cargo build --release --target x86_64-unknown-linux-musl --bins`, then run `scripts/package-release.sh v0.1.0 x86_64-unknown-linux-musl` to create the tarball and checksum.
+- The VPS installer downloads GitHub release assets by tag. Verify checksums before use and never upload `target/`, secrets, tokens, pairing material, or filled env files.
 
 ## Deployment and Secret Handling
 

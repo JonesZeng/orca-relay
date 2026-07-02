@@ -128,22 +128,55 @@ export ORCA_RELAY_CLIENT_ID='remote-cli-1'
 export ORCA_RELAY_URL='wss://<your-relay-domain.example>/ws'
 ```
 
-## 一条命令部署 VPS 中继
+## 通过 GitHub Release 安装
 
-GitHub release 场景下，推荐的 VPS 安装入口是：
+### 预编译二进制
+
+GitHub release `v0.1.0` 发布一个 Linux x86_64 预编译 tarball：
+
+```text
+orca-relay-v0.1.0-x86_64-unknown-linux-musl.tar.gz
+orca-relay-v0.1.0-x86_64-unknown-linux-musl.tar.gz.sha256
+```
+
+每个归档包含：
+
+- `orca-relay`
+- `orca-relay-proxy`
+- `orca-relay-bridge`
+
+未来如增加其他 target，应沿用同一命名模式：`orca-relay-v0.1.0-<target>.tar.gz`。解压前先校验配套 checksum 文件：
 
 ```sh
-curl -fsSL "https://raw.githubusercontent.com/<OWNER>/orca-relay/<TAG>/scripts/install-vps.sh" \
+TARGET='x86_64-unknown-linux-musl'
+BASE_URL='https://github.com/JonesZeng/orca-relay/releases/download/v0.1.0'
+
+curl -fLO "$BASE_URL/orca-relay-v0.1.0-$TARGET.tar.gz"
+curl -fLO "$BASE_URL/orca-relay-v0.1.0-$TARGET.tar.gz.sha256"
+sha256sum -c "orca-relay-v0.1.0-$TARGET.tar.gz.sha256"
+tar -xzf "orca-relay-v0.1.0-$TARGET.tar.gz"
+```
+
+下面的 VPS 安装器默认使用同一套 release 产物命名。只有需要显式指定仓库时才设置 `ORCA_RELAY_GITHUB_REPO=JonesZeng/orca-relay`；它已经是安装器默认值。
+
+## VPS 部署
+
+### 一条命令部署 VPS 中继
+
+对于 GitHub release `v0.1.0`，推荐的 VPS 安装入口会从 `JonesZeng/orca-relay` 下载预编译的 `orca-relay-v0.1.0-<target>.tar.gz` 产物：
+
+```sh
+curl -fsSL "https://raw.githubusercontent.com/JonesZeng/orca-relay/v0.1.0/scripts/install-vps.sh" \
   | sudo bash -s -- install \
       --domain '<your-relay-domain.example>' \
       --bind '127.0.0.1:8080' \
-      --version '<TAG>' \
+      --version 'v0.1.0' \
       --caddy-mode managed
 ```
 
 安装器负责：
 
-- 安装 release 文件到 `/opt/orca-relay/`，并维护 `current` symlink。
+- 安装 release 产物到 `/opt/orca-relay/`，并维护 `current` symlink。
 - 写入 `/etc/orca-relay/orca-relay.env`，包含 `ORCA_RELAY_BIND`、`ORCA_RELAY_TOKEN`、`RUST_LOG`。
 - 写入 `/etc/systemd/system/orca-relay.service`。
 - 可选写入 Caddy 站点，把公网域名反向代理到本机 loopback relay。
@@ -159,26 +192,26 @@ Token 规则：
 使用已有 token 文件：
 
 ```sh
-curl -fsSL "https://raw.githubusercontent.com/<OWNER>/orca-relay/<TAG>/scripts/install-vps.sh" \
+curl -fsSL "https://raw.githubusercontent.com/JonesZeng/orca-relay/v0.1.0/scripts/install-vps.sh" \
   | sudo env ORCA_RELAY_TOKEN_FILE='/root/orca-relay-token' \
       bash -s -- install \
         --domain '<your-relay-domain.example>' \
         --bind '127.0.0.1:8080' \
-        --version '<TAG>' \
+        --version 'v0.1.0' \
         --caddy-mode managed
 ```
 
 如果你已经有 Nginx/Caddy/Traefik 或平台托管 TLS：
 
 ```sh
-curl -fsSL "https://raw.githubusercontent.com/<OWNER>/orca-relay/<TAG>/scripts/install-vps.sh" \
+curl -fsSL "https://raw.githubusercontent.com/JonesZeng/orca-relay/v0.1.0/scripts/install-vps.sh" \
   | sudo bash -s -- install \
       --bind '127.0.0.1:8080' \
-      --version '<TAG>' \
+      --version 'v0.1.0' \
       --caddy-mode skip
 ```
 
-Pipe-to-root 安装器需要信任边界。公开使用时请固定 `<TAG>`，必要时先审阅 `scripts/install-vps.sh`，或改用手动安装 release artifacts。
+Pipe-to-root 安装器需要信任边界。公开使用时请固定 release tag，必要时先审阅 `scripts/install-vps.sh`，或改用上面已校验的 release 产物手动安装。
 
 ### 手动部署布局
 
@@ -334,17 +367,19 @@ curl -fsS 'http://127.0.0.1:8080/health'
 
 ## 从源码构建
 
+预编译 release 二进制是普通安装路径。只有在没有匹配的发布目标平台、需要本地补丁，或你想自己审计构建产物时，才需要从源码构建：
+
 ```sh
 cargo build --release
 ```
 
-Release 二进制：
+本地 release 二进制：
 
 - `target/release/orca-relay`
 - `target/release/orca-relay-proxy`
 - `target/release/orca-relay-bridge`
 
-不要在公开 release 自动化中依赖本地 `target/` 目录；应发布明确的 GitHub release assets 和 checksum。
+对于静态 Linux 构建，取决于构建方式，本仓库本地也可能出现 `target/x86_64-unknown-linux-musl/release/` 输出。不要在公开 release 自动化中依赖本地 `target/` 目录；应发布明确的 GitHub Release 产物和 checksum 文件。
 
 ## 验证
 

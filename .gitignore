@@ -1,6 +1,9 @@
 # Rust build output
 target/
 
+# Release packaging output
+dist/
+
 # Python caches
 __pycache__/
 *.py[cod]

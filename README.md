@@ -128,18 +128,50 @@ export ORCA_RELAY_CLIENT_ID='remote-cli-1'
 export ORCA_RELAY_URL='wss://<your-relay-domain.example>/ws'
 ```
 
+## Installation from GitHub releases
+
+### Prebuilt binaries
+
+GitHub release `v0.1.0` publishes a prebuilt Linux x86_64 tarball:
+
+```text
+orca-relay-v0.1.0-x86_64-unknown-linux-musl.tar.gz
+orca-relay-v0.1.0-x86_64-unknown-linux-musl.tar.gz.sha256
+```
+
+Each archive contains:
+
+- `orca-relay`
+- `orca-relay-proxy`
+- `orca-relay-bridge`
+
+Future targets should use the same naming pattern: `orca-relay-v0.1.0-<target>.tar.gz`. Verify the checksum sidecar before unpacking:
+
+```sh
+TARGET='x86_64-unknown-linux-musl'
+BASE_URL='https://github.com/JonesZeng/orca-relay/releases/download/v0.1.0'
+
+curl -fLO "$BASE_URL/orca-relay-v0.1.0-$TARGET.tar.gz"
+curl -fLO "$BASE_URL/orca-relay-v0.1.0-$TARGET.tar.gz.sha256"
+sha256sum -c "orca-relay-v0.1.0-$TARGET.tar.gz.sha256"
+tar -xzf "orca-relay-v0.1.0-$TARGET.tar.gz"
+```
+
+The VPS installer below uses the same release asset naming by default. Set `ORCA_RELAY_GITHUB_REPO=JonesZeng/orca-relay` only if you need to be explicit; it is already the installer default.
+
+
 ## VPS deployment
 
 ### One-command installer
 
-For GitHub releases, the intended VPS install path is:
+For GitHub release `v0.1.0`, the intended VPS install path downloads a prebuilt `orca-relay-v0.1.0-<target>.tar.gz` asset from `JonesZeng/orca-relay`:
 
 ```sh
-curl -fsSL "https://raw.githubusercontent.com/<OWNER>/orca-relay/<TAG>/scripts/install-vps.sh" \
+curl -fsSL "https://raw.githubusercontent.com/JonesZeng/orca-relay/v0.1.0/scripts/install-vps.sh" \
   | sudo bash -s -- install \
       --domain '<your-relay-domain.example>' \
       --bind '127.0.0.1:8080' \
-      --version '<TAG>' \
+      --version 'v0.1.0' \
       --caddy-mode managed
 ```
 
@@ -161,26 +193,26 @@ Token handling:
 Example with an operator-supplied token file:
 
 ```sh
-curl -fsSL "https://raw.githubusercontent.com/<OWNER>/orca-relay/<TAG>/scripts/install-vps.sh" \
+curl -fsSL "https://raw.githubusercontent.com/JonesZeng/orca-relay/v0.1.0/scripts/install-vps.sh" \
   | sudo env ORCA_RELAY_TOKEN_FILE='/root/orca-relay-token' \
       bash -s -- install \
         --domain '<your-relay-domain.example>' \
         --bind '127.0.0.1:8080' \
-        --version '<TAG>' \
+        --version 'v0.1.0' \
         --caddy-mode managed
 ```
 
 If you already manage TLS/reverse proxy yourself:
 
 ```sh
-curl -fsSL "https://raw.githubusercontent.com/<OWNER>/orca-relay/<TAG>/scripts/install-vps.sh" \
+curl -fsSL "https://raw.githubusercontent.com/JonesZeng/orca-relay/v0.1.0/scripts/install-vps.sh" \
   | sudo bash -s -- install \
       --bind '127.0.0.1:8080' \
-      --version '<TAG>' \
+      --version 'v0.1.0' \
       --caddy-mode skip
 ```
 
-Pipe-to-root installers require trust. Pin `<TAG>`, inspect `scripts/install-vps.sh`, or perform a manual install from release artifacts if you need an auditable path.
+Pipe-to-root installers require trust. Pin the release tag, inspect `scripts/install-vps.sh`, or perform a manual install from the verified release artifacts above if you need an auditable path.
 
 ### Manual service layout
 
@@ -335,6 +367,8 @@ The public deployment fact captured during development was `wss://relay-orca.luc
 | `adapter text payload was not UTF-8` | Adapter opcode mismatch | Non-UTF-8 bytes must travel as WebSocket binary frames, not text frames. |
 
 ## Build from source
+
+Use this as the fallback path when no prebuilt release asset matches your platform or when you need a local development build.
 
 ```sh
 cargo build --release

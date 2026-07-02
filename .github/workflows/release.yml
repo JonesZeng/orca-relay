@@ -1,0 +1,76 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux-musl:
+    name: Build x86_64 Linux musl release
+    runs-on: ubuntu-latest
+    env:
+      TARGET: x86_64-unknown-linux-musl
+      BINARIES: orca-relay orca-relay-proxy orca-relay-bridge
+    steps:
+      - name: Check release ref
+        run: |
+          set -euo pipefail
+          case "${GITHUB_REF}" in
+            refs/tags/v*) ;;
+            *)
+              echo "::error::Release workflow must run from a v* tag ref."
+              exit 1
+              ;;
+          esac
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install musl toolchain
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends musl-tools
+          rustup target add "${TARGET}"
+
+      - name: Build release binaries
+        run: cargo build --release --locked --target "${TARGET}" --bins
+
+      - name: Package release assets
+        run: |
+          set -euo pipefail
+          asset_name="orca-relay-${GITHUB_REF_NAME}-${TARGET}.tar.gz"
+          staging_dir="dist/orca-relay-${GITHUB_REF_NAME}-${TARGET}"
+          mkdir -p "${staging_dir}"
+
+          for binary in ${BINARIES}; do
+            cp "target/${TARGET}/release/${binary}" "${staging_dir}/"
+          done
+
+          tar -czf "dist/${asset_name}" -C "${staging_dir}" ${BINARIES}
+          (
+            cd dist
+            sha256sum "${asset_name}" > "${asset_name}.sha256"
+          )
+
+      - name: Upload assets to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          asset_name="orca-relay-${GITHUB_REF_NAME}-${TARGET}.tar.gz"
+          assets=("dist/${asset_name}" "dist/${asset_name}.sha256")
+
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" "${assets[@]}" --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" "${assets[@]}" \
+              --title "${GITHUB_REF_NAME}" \
+              --generate-notes \
+              --verify-tag
+          fi

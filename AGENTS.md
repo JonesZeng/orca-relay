@@ -119,6 +119,13 @@ cargo run --bin orca-relay -- rewrite-pairing-code \
 
 Supported input shapes are bare URL-safe base64 pairing payloads, `orca://pair?...` links, and Orca Desktop browser URLs containing `#pairing=`.
 
+## Release maintenance
+
+- For v0.1.0, GitHub release assets are precompiled tarballs named `orca-relay-v0.1.0-<target>.tar.gz`.
+- Each tarball must contain exactly the three release binaries: `orca-relay`, `orca-relay-proxy`, and `orca-relay-bridge`.
+- Build release binaries with an explicit target such as `cargo build --release --target x86_64-unknown-linux-musl --bins`, then use `scripts/package-release.sh` to package built binaries and checksums for upload.
+- Installer paths should download GitHub release assets by tag; verify checksums before use and never upload `target/`, secrets, tokens, pairing material, or filled env files.
+
 ## Deployment and secrets
 
 - Installer usage should pin a release tag and inspect the script when an auditable path is needed.

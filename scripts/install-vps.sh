@@ -320,17 +320,17 @@ asset_target() {
 
 download_release() {
   local release_dir="$1"
-  local target base url archive checksum_url
-  [[ -n "$VERSION" ]] || die "no local binary found; pass --version and --asset-base-url or set ORCA_RELAY_BINARY"
+  local target base asset_name url archive checksum_url
+  [[ -n "$VERSION" ]] || die "no local binary found; pass --version or set ORCA_RELAY_BINARY"
   target="$(asset_target)"
   if [[ -n "$ASSET_BASE_URL" ]]; then
     base="${ASSET_BASE_URL%/}"
   else
-    base="https://github.com/${ORCA_RELAY_GITHUB_REPO:-<OWNER>/orca-relay}/releases/download/$VERSION"
+    base="https://github.com/${ORCA_RELAY_GITHUB_REPO:-JonesZeng/orca-relay}/releases/download/$VERSION"
   fi
-  [[ "$base" != *"<OWNER>"* ]] || die "set --asset-base-url or ORCA_RELAY_GITHUB_REPO before downloading release assets"
-  url="$base/orca-relay-$VERSION-$target.tar.gz"
-  archive="$release_dir/orca-relay.tar.gz"
+  asset_name="orca-relay-$VERSION-$target.tar.gz"
+  url="$base/$asset_name"
+  archive="$release_dir/$asset_name"
   checksum_url="$url.sha256"
   command -v curl >/dev/null 2>&1 || die "curl is required to download release assets"
   command -v tar >/dev/null 2>&1 || die "tar is required to unpack release assets"

@@ -1,0 +1,30 @@
+# Rust build output
+target/
+
+# Python caches
+__pycache__/
+*.py[cod]
+
+# Local env/secrets
+.env
+.env.*
+*.env.local
+*.pem
+*.key
+*.crt
+
+# Logs and generated local reports
+*.log
+*.tmp
+*.bak
+
+# Local development artifacts used during initial project buildout
+task.md
+docs/agent-ops/
+orca-relay-dev.omhflow
+orca-relay-dev/
+
+# OS/editor noise
+.DS_Store
+.vscode/
+.idea/

@@ -348,6 +348,34 @@ Support scripts:
 | `scripts/cloudflare-relay-mode.sh` | Checks or switches Cloudflare DNS-only/proxied mode. Dry-run by default unless `--apply` is supplied. |
 | `scripts/compare-cloudflare-relay-latency.sh` | Runs grey-vs-orange latency probes by composing the two scripts above. |
 | `scripts/test_support_scripts.py` | Local checks for frame construction, token redaction, and helper script safety. |
+| `scripts/orca-relay-soft-death-probe.sh` | Evidence-only soft-death probe. Samples TCP Send-Q / bytes / lastrcv and freezes local+remote snapshots on warn/crit. Never restarts services. |
+| `scripts/orca-relay-bridge-watchdog.sh` | Local connectivity watchdog. Restarts headless Electron serve and/or the bridge when the path is dead or soft-wedged. Does **not** bounce remote/public proxies. |
+| `scripts/restart-orca-relay-mobile.sh` | Full operator restart: remote relay/proxy units + local Xvfb/Electron serve + pairing-code refresh + public health/WS checks. |
+
+### Soft-death probe and local watchdog
+
+Process-level health (`bridge pid` + `:443 ESTAB` + public `/health`) can stay green while the application session is already wedged. The soft-death tooling covers that gap:
+
+```sh
+# Evidence only (safe to leave running)
+bash scripts/orca-relay-soft-death-probe.sh --once --json
+bash scripts/orca-relay-soft-death-probe.sh --loop
+
+# Local repair loop (never restarts remote proxies)
+bash scripts/orca-relay-bridge-watchdog.sh --status --json
+bash scripts/orca-relay-bridge-watchdog.sh --loop
+
+# Full manual restart of remote proxies + local runtime
+bash scripts/restart-orca-relay-mobile.sh
+```
+
+Recommended operator split:
+
+1. Keep `orca-relay-soft-death-probe.sh --loop` for evidence capture.
+2. Keep `orca-relay-bridge-watchdog.sh --loop` for local auto-repair (runtime/bridge only).
+3. Use `restart-orca-relay-mobile.sh` only when you intentionally want to bounce the remote path too.
+
+All three scripts read the persisted relay identity from `ORCA_RELAY_ENV_FILE` (default `/root/.config/orca/orca-relay.env`) and accept `ORCA_*` overrides for bridge path, health URL, remote host, and thresholds. Defaults point at local development paths such as `target/release/orca-relay-bridge` and placeholders like `https://<your-relay-domain.example>/health`.
 
 The public deployment fact captured during development was `wss://relay-orca.lucaszen.dpdns.org/ws` with Cloudflare DNS-only / grey cloud. Treat that as a deployment example, not a shared public service contract.
 
@@ -365,6 +393,8 @@ The public deployment fact captured during development was `wss://relay-orca.luc
 | CLI connects to wrong port | Proxy bind / pairing endpoint | Use the exact `ws://.../ws` endpoint printed by `orca-relay-proxy` or set a stable `--bind`. |
 | Orange-cloud Cloudflare mode changes behavior | Cloudflare edge path | Baseline DNS-only/grey first; verify WebSocket and TLS settings separately before using orange mode. |
 | `adapter text payload was not UTF-8` | Adapter opcode mismatch | Non-UTF-8 bytes must travel as WebSocket binary frames, not text frames. |
+| Bridge process + `:443 ESTAB` look healthy, but clients hang | Soft-death / wedged session | Run `scripts/orca-relay-soft-death-probe.sh --once --json`. High Send-Q with flat `bytes_sent`, elevated `lastrcv`, or missing bridge `:443` are the main signals. |
+| Local runtime port `:6768` is down after host reboot | Local headless serve | Use `scripts/orca-relay-bridge-watchdog.sh` (runtime repair) or `scripts/restart-orca-relay-mobile.sh` for a full restart. |
 
 ## Build from source
 
@@ -387,7 +417,7 @@ For static Linux builds, this repository may also contain local `target/x86_64-u
 Contributor release gate:
 
 ```sh
-cargo test && cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && python3 scripts/test_support_scripts.py && python3 -m py_compile scripts/measure-relay-ws-latency.py scripts/test_support_scripts.py && bash -n scripts/cloudflare-relay-mode.sh scripts/compare-cloudflare-relay-latency.sh scripts/install-vps.sh
+cargo test && cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && python3 scripts/test_support_scripts.py && python3 -m py_compile scripts/measure-relay-ws-latency.py scripts/test_support_scripts.py && bash -n scripts/cloudflare-relay-mode.sh scripts/compare-cloudflare-relay-latency.sh scripts/install-vps.sh scripts/orca-relay-bridge-watchdog.sh scripts/orca-relay-soft-death-probe.sh scripts/restart-orca-relay-mobile.sh
 ```
 
 What this proves:
@@ -427,7 +457,10 @@ orca-relay/
 │   ├── measure-relay-ws-latency.py
 │   ├── cloudflare-relay-mode.sh
 │   ├── compare-cloudflare-relay-latency.sh
-│   └── test_support_scripts.py
+│   ├── test_support_scripts.py
+│   ├── orca-relay-soft-death-probe.sh
+│   ├── orca-relay-bridge-watchdog.sh
+│   └── restart-orca-relay-mobile.sh
 └── assets/
     ├── README.md
     └── prompts/

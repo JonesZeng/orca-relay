@@ -21,7 +21,7 @@
 - `tests/relay_contract.rs`: `/health`, bearer auth, fail-fast routing, and server/client replacement behavior.
 - `tests/adapter_contract.rs`: adapter frame codec and proxy/bridge round trips without mutating bytes.
 - `tests/pairing_code.rs`: endpoint-only pairing-code rewrites and invalid-input rejection.
-- `scripts/`: VPS installer, systemd/Caddy/env templates, latency helpers, and script safety checks.
+- `scripts/`: VPS installer, systemd/Caddy/env templates, latency helpers, soft-death probe, local watchdog, full restart helper, and script safety checks.
 - `assets/README.md` and `assets/prompts/`: public-safe image-generation prompts and expected image paths.
 
 ## Claude Development Workflow
@@ -61,13 +61,13 @@ cargo clippy --all-targets --all-features -- -D warnings
 ```sh
 python3 scripts/test_support_scripts.py
 python3 -m py_compile scripts/measure-relay-ws-latency.py scripts/test_support_scripts.py
-bash -n scripts/cloudflare-relay-mode.sh scripts/compare-cloudflare-relay-latency.sh scripts/install-vps.sh
+bash -n scripts/cloudflare-relay-mode.sh scripts/compare-cloudflare-relay-latency.sh scripts/install-vps.sh scripts/orca-relay-bridge-watchdog.sh scripts/orca-relay-soft-death-probe.sh scripts/restart-orca-relay-mobile.sh
 ```
 
 - Full contributor release gate from `README.md`:
 
 ```sh
-cargo test && cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && python3 scripts/test_support_scripts.py && python3 -m py_compile scripts/measure-relay-ws-latency.py scripts/test_support_scripts.py && bash -n scripts/cloudflare-relay-mode.sh scripts/compare-cloudflare-relay-latency.sh scripts/install-vps.sh
+cargo test && cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && python3 scripts/test_support_scripts.py && python3 -m py_compile scripts/measure-relay-ws-latency.py scripts/test_support_scripts.py && bash -n scripts/cloudflare-relay-mode.sh scripts/compare-cloudflare-relay-latency.sh scripts/install-vps.sh scripts/orca-relay-bridge-watchdog.sh scripts/orca-relay-soft-death-probe.sh scripts/restart-orca-relay-mobile.sh
 ```
 
 ## Release Maintenance

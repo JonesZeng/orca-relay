@@ -347,6 +347,34 @@ curl -fsS 'http://127.0.0.1:8080/health'
 | `scripts/cloudflare-relay-mode.sh` | 检查或切换 Cloudflare DNS-only / proxied 模式。默认 dry-run，只有 `--apply` 才修改。 |
 | `scripts/compare-cloudflare-relay-latency.sh` | 组合前两个脚本对比灰云/橙云路径延迟。 |
 | `scripts/test_support_scripts.py` | 本地检查 frame 构造、token redaction、脚本安全默认值。 |
+| `scripts/orca-relay-soft-death-probe.sh` | 仅取证的 soft-death 探活。采样 TCP Send-Q / bytes / lastrcv，在 warn/crit 时冻结本地+远端快照；**不重启**任何服务。 |
+| `scripts/orca-relay-bridge-watchdog.sh` | 本地连通性 watchdog。在路径死亡或 soft-wedge 时重启 headless Electron serve 和/或 bridge；**不**重启远端/公网 proxy。 |
+| `scripts/restart-orca-relay-mobile.sh` | 运维一键全量重启：远端 relay/proxy 单元 + 本地 Xvfb/Electron serve + pairing-code 刷新 + 公网健康/WS 检查。 |
+
+### Soft-death 探活与本地 watchdog
+
+进程级健康（`bridge pid` + `:443 ESTAB` + 公网 `/health`）可能仍然是绿的，但应用会话已经卡死。soft-death 工具覆盖这个缺口：
+
+```sh
+# 仅取证（可长期挂着）
+bash scripts/orca-relay-soft-death-probe.sh --once --json
+bash scripts/orca-relay-soft-death-probe.sh --loop
+
+# 本地修复循环（永不重启远端 proxy）
+bash scripts/orca-relay-bridge-watchdog.sh --status --json
+bash scripts/orca-relay-bridge-watchdog.sh --loop
+
+# 手动全量重启（远端 proxy + 本地 runtime）
+bash scripts/restart-orca-relay-mobile.sh
+```
+
+推荐运维拆分：
+
+1. 用 `orca-relay-soft-death-probe.sh --loop` 做证据采集。
+2. 用 `orca-relay-bridge-watchdog.sh --loop` 做本地自动修复（只动 runtime/bridge）。
+3. 只有在你明确要弹远端路径时才用 `restart-orca-relay-mobile.sh`。
+
+三个脚本都从 `ORCA_RELAY_ENV_FILE`（默认 `/root/.config/orca/orca-relay.env`）读取持久化的 relay 身份，并支持 `ORCA_*` 覆盖 bridge 路径、健康 URL、远端主机和阈值。默认值指向本地开发路径（如 `target/release/orca-relay-bridge`）以及占位符 `https://<your-relay-domain.example>/health`。
 
 开发期间记录过的公开部署事实是 `wss://relay-orca.lucaszen.dpdns.org/ws`，Cloudflare DNS-only（灰云）模式。把它视为部署示例，不要当成公共共享服务承诺。
 
@@ -364,6 +392,8 @@ curl -fsS 'http://127.0.0.1:8080/health'
 | CLI 连错端口 | Proxy bind / pairing endpoint | 使用 `orca-relay-proxy` 打印的 `ws://.../ws`，或设置稳定 `--bind`。 |
 | Cloudflare 橙云模式行为变化 | Cloudflare edge path | 先用 DNS-only 灰云建立 baseline，再单独验证橙云 WebSocket/TLS。 |
 | `adapter text payload was not UTF-8` | Adapter opcode mismatch | 非 UTF-8 字节必须作为 WebSocket binary frame 发送，而不是 text frame。 |
+| Bridge 进程 + `:443 ESTAB` 看起来健康，但客户端卡住 | Soft-death / 会话卡死 | 跑 `scripts/orca-relay-soft-death-probe.sh --once --json`。高 Send-Q 且 `bytes_sent` 不涨、`lastrcv` 升高、或 bridge 没有 `:443` 是主要信号。 |
+| 主机重启后本地 runtime 端口 `:6768` 掉线 | 本地 headless serve | 用 `scripts/orca-relay-bridge-watchdog.sh`（runtime 修复）或 `scripts/restart-orca-relay-mobile.sh` 做全量重启。 |
 
 ## 从源码构建
 
@@ -386,7 +416,7 @@ cargo build --release
 贡献者 release gate：
 
 ```sh
-cargo test && cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && python3 scripts/test_support_scripts.py && python3 -m py_compile scripts/measure-relay-ws-latency.py scripts/test_support_scripts.py && bash -n scripts/cloudflare-relay-mode.sh scripts/compare-cloudflare-relay-latency.sh scripts/install-vps.sh
+cargo test && cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && python3 scripts/test_support_scripts.py && python3 -m py_compile scripts/measure-relay-ws-latency.py scripts/test_support_scripts.py && bash -n scripts/cloudflare-relay-mode.sh scripts/compare-cloudflare-relay-latency.sh scripts/install-vps.sh scripts/orca-relay-bridge-watchdog.sh scripts/orca-relay-soft-death-probe.sh scripts/restart-orca-relay-mobile.sh
 ```
 
 这能证明：
@@ -426,7 +456,10 @@ orca-relay/
 │   ├── measure-relay-ws-latency.py
 │   ├── cloudflare-relay-mode.sh
 │   ├── compare-cloudflare-relay-latency.sh
-│   └── test_support_scripts.py
+│   ├── test_support_scripts.py
+│   ├── orca-relay-soft-death-probe.sh
+│   ├── orca-relay-bridge-watchdog.sh
+│   └── restart-orca-relay-mobile.sh
 └── assets/
     ├── README.md
     └── prompts/

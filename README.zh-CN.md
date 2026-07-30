@@ -161,6 +161,22 @@ tar -xzf "orca-relay-v0.1.0-$TARGET.tar.gz"
 
 ## VPS 部署
 
+### 用 agent 一键部署
+
+`skills/deploy-orca-relay/SKILL.md` 是一份写给 coding agent 的自包含部署 runbook：它会先把缺失信息问清楚，根据你有没有自己的域名选择拓扑，然后依次完成 VPS 中继安装、bridge 与 proxy 启动、配对码改写，最后装上本地稳定性层。每个阶段都有验证关卡，agent 必须把输出给你看过才能继续。
+
+把它放到你的 agent 加载技能的位置即可，例如 `.claude/skills/deploy-orca-relay/SKILL.md`、`.agents/skills/deploy-orca-relay/SKILL.md` 或 `~/.agents/skills/deploy-orca-relay/SKILL.md`。如果你的 agent 没有技能机制，直接贴这段 prompt：
+
+```text
+读取 orca-relay 仓库里的 skills/deploy-orca-relay/SKILL.md，然后帮我部署 Orca Relay。
+我有一台 Linux VPS（ssh host: <vps-host>），域名情况是 <有域名: your-relay-domain.example | 没有域名>。
+Orca runtime 跑在 <runtime-host> 的 <orca-runtime-port> 端口，Orca CLI 跑在 <client-host>。
+缺什么信息先问我；任何会写入系统的安装之前先跑安装器的 `render` 预览；
+每个验证关卡都停下来把输出给我看；任何情况下都不要把 relay token 打印出来。
+```
+
+下面的手工步骤就是这个技能实际驱动的流程，你也可以照着自己一步步做。
+
 ### 一条命令部署 VPS 中继
 
 对于 GitHub release `v0.1.0`，推荐的 VPS 安装入口会从 `JonesZeng/orca-relay` 下载预编译的 `orca-relay-v0.1.0-<target>.tar.gz` 产物：
@@ -348,7 +364,8 @@ curl -fsS 'http://127.0.0.1:8080/health'
 | `scripts/compare-cloudflare-relay-latency.sh` | 组合前两个脚本对比灰云/橙云路径延迟。 |
 | `scripts/test_support_scripts.py` | 本地检查 frame 构造、token redaction、脚本安全默认值。 |
 | `scripts/orca-relay-soft-death-probe.sh` | 仅取证的 soft-death 探活。采样 TCP Send-Q / bytes / lastrcv，在 warn/crit 时冻结本地+远端快照；**不重启**任何服务。 |
-| `scripts/orca-relay-bridge-watchdog.sh` | 本地连通性 watchdog。在路径死亡或 soft-wedge 时重启 headless Electron serve 和/或 bridge；**不**重启远端/公网 proxy。 |
+| `scripts/orca-relay-bridge-watchdog.sh` | 本地连通性 watchdog。在路径死亡或 soft-wedge 时重启 headless `orca serve` runtime 和/或 bridge；**不**重启远端/公网 proxy。 |
+| `scripts/orca-relay-watchdog-daemon.sh` | watchdog 循环的脱离终端单实例守护器。用 `setsid` 加 `flock` 锁，保证退出终端/tmux/SSH 后仍存活，且不会重复启动。 |
 | `scripts/restart-orca-relay-mobile.sh` | 运维一键全量重启：远端 relay/proxy 单元 + 本地 Xvfb/Electron serve + pairing-code 刷新 + 公网健康/WS 检查。 |
 
 ### Soft-death 探活与本地 watchdog
@@ -364,6 +381,11 @@ bash scripts/orca-relay-soft-death-probe.sh --loop
 bash scripts/orca-relay-bridge-watchdog.sh --status --json
 bash scripts/orca-relay-bridge-watchdog.sh --loop
 
+# 同一个循环，脱离终端且单实例（退出终端/tmux 也不会死）
+bash scripts/orca-relay-watchdog-daemon.sh start
+bash scripts/orca-relay-watchdog-daemon.sh status
+bash scripts/orca-relay-watchdog-daemon.sh stop
+
 # 手动全量重启（远端 proxy + 本地 runtime）
 bash scripts/restart-orca-relay-mobile.sh
 ```
@@ -371,8 +393,10 @@ bash scripts/restart-orca-relay-mobile.sh
 推荐运维拆分：
 
 1. 用 `orca-relay-soft-death-probe.sh --loop` 做证据采集。
-2. 用 `orca-relay-bridge-watchdog.sh --loop` 做本地自动修复（只动 runtime/bridge）。
+2. 用 `orca-relay-bridge-watchdog.sh --loop` 做本地自动修复（只动 runtime/bridge）；无人值守场景用 `orca-relay-watchdog-daemon.sh start` 拉起。
 3. 只有在你明确要弹远端路径时才用 `restart-orca-relay-mobile.sh`。
+
+当前 `orca serve` CLI 不接受 relay 参数，也不再托管 bridge，所以 watchdog 把 runtime 和 bridge 当成两个独立 tmux 服务来看（默认 `orca-server-relay` 和 `orca-relay-bridge`），只重启真正挂掉的那一个。
 
 三个脚本都从 `ORCA_RELAY_ENV_FILE`（默认 `/root/.config/orca/orca-relay.env`）读取持久化的 relay 身份，并支持 `ORCA_*` 覆盖 bridge 路径、健康 URL、远端主机和阈值。默认值指向本地开发路径（如 `target/release/orca-relay-bridge`）以及占位符 `https://<your-relay-domain.example>/health`。
 
@@ -459,7 +483,11 @@ orca-relay/
 │   ├── test_support_scripts.py
 │   ├── orca-relay-soft-death-probe.sh
 │   ├── orca-relay-bridge-watchdog.sh
+│   ├── orca-relay-watchdog-daemon.sh
 │   └── restart-orca-relay-mobile.sh
+├── skills/
+│   └── deploy-orca-relay/
+│       └── SKILL.md
 └── assets/
     ├── README.md
     └── prompts/
@@ -472,5 +500,6 @@ orca-relay/
 | `src/bin/orca-relay-proxy.rs` | 远端本地代理 CLI。 |
 | `src/bin/orca-relay-bridge.rs` | Runtime 侧桥接 CLI。 |
 | `scripts/` | 部署模板、一键 VPS 安装器和运维脚本。 |
+| `skills/deploy-orca-relay/SKILL.md` | 给 VPS 运维者（有域名或没有域名都适用）的 agent 可执行部署 runbook。 |
 | `tests/` | Relay、adapter、配对码契约测试。 |
 | `assets/prompts/` | README 图像生成 prompts。 |

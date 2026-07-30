@@ -152,6 +152,13 @@ case "$CADDY_MODE" in
   *) die "--caddy-mode must be managed, render-only, or skip" ;;
 esac
 
+# Managed Caddy writes a real site block and reloads Caddy. Without a hostname it
+# would install the documentation placeholder and then fail certificate issuance,
+# so refuse the mutating install. render and --dry-run still preview freely.
+if [[ "$COMMAND" == "install" && "$DRY_RUN" != "1" && "$CADDY_MODE" == "managed" && -z "$DOMAIN" ]]; then
+  die "--caddy-mode managed requires --domain (or ORCA_RELAY_DOMAIN); use --caddy-mode skip when you terminate TLS yourself"
+fi
+
 ENV_FILE="$CONFIG_DIR/orca-relay.env"
 UNIT_FILE="/etc/systemd/system/$SERVICE_NAME"
 CURRENT_LINK="$INSTALL_DIR/current"

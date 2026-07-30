@@ -20,8 +20,10 @@
 - `scripts/orca-relay.env.example`, `scripts/orca-relay.service.template`, `scripts/Caddyfile.orca-relay.template`: deployment templates.
 - `scripts/measure-relay-ws-latency.py`, `scripts/cloudflare-relay-mode.sh`, `scripts/compare-cloudflare-relay-latency.sh`, `scripts/test_support_scripts.py`: operations and support checks.
 - `scripts/orca-relay-soft-death-probe.sh`: evidence-only soft-death probe for wedged sessions (TCP Send-Q / lastrcv / local+remote snapshots).
-- `scripts/orca-relay-bridge-watchdog.sh`: local connectivity watchdog that restarts headless Electron serve and/or the bridge; never bounces remote proxies.
+- `scripts/orca-relay-bridge-watchdog.sh`: local connectivity watchdog that restarts the headless `orca serve` runtime and/or the bridge; never bounces remote proxies. The current `orca serve` CLI takes no relay arguments and does not parent a bridge, so runtime and bridge are supervised as two independent tmux services.
+- `scripts/orca-relay-watchdog-daemon.sh`: detached singleton supervisor (`setsid` + `flock`) for the watchdog loop, so unattended repair survives terminal/tmux/SSH exit.
 - `scripts/restart-orca-relay-mobile.sh`: full operator restart for remote relay/proxy units plus local Xvfb/Electron serve and public health checks.
+- `skills/deploy-orca-relay/SKILL.md`: agent-executable deployment runbook for VPS operators with or without their own domain. Keep it consistent with the installer flags, script names, and secret rules that actually exist.
 
 ## Safe development rules
 
@@ -45,13 +47,13 @@ cargo fmt --check
 cargo clippy --all-targets --all-features -- -D warnings
 python3 scripts/test_support_scripts.py
 python3 -m py_compile scripts/measure-relay-ws-latency.py scripts/test_support_scripts.py
-bash -n scripts/cloudflare-relay-mode.sh scripts/compare-cloudflare-relay-latency.sh scripts/install-vps.sh scripts/orca-relay-bridge-watchdog.sh scripts/orca-relay-soft-death-probe.sh scripts/restart-orca-relay-mobile.sh
+bash -n scripts/cloudflare-relay-mode.sh scripts/compare-cloudflare-relay-latency.sh scripts/install-vps.sh scripts/orca-relay-bridge-watchdog.sh scripts/orca-relay-soft-death-probe.sh scripts/orca-relay-watchdog-daemon.sh scripts/restart-orca-relay-mobile.sh
 ```
 
 Contributor release gate from the README:
 
 ```sh
-cargo test && cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && python3 scripts/test_support_scripts.py && python3 -m py_compile scripts/measure-relay-ws-latency.py scripts/test_support_scripts.py && bash -n scripts/cloudflare-relay-mode.sh scripts/compare-cloudflare-relay-latency.sh scripts/install-vps.sh scripts/orca-relay-bridge-watchdog.sh scripts/orca-relay-soft-death-probe.sh scripts/restart-orca-relay-mobile.sh
+cargo test && cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && python3 scripts/test_support_scripts.py && python3 -m py_compile scripts/measure-relay-ws-latency.py scripts/test_support_scripts.py && bash -n scripts/cloudflare-relay-mode.sh scripts/compare-cloudflare-relay-latency.sh scripts/install-vps.sh scripts/orca-relay-bridge-watchdog.sh scripts/orca-relay-soft-death-probe.sh scripts/orca-relay-watchdog-daemon.sh scripts/restart-orca-relay-mobile.sh
 ```
 
 Health checks after deployment:

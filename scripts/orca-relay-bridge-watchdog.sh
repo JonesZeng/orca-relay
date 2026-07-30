@@ -3,8 +3,11 @@
 #
 # Policy (operator preference):
 #   If the path cannot connect, repair it.
-#   Most real outages are Electron itself dying — so restart the local runtime
-#   (Xvfb + Electron serve, which parents the bridge), not only the bridge.
+#   Most real outages are the runtime itself dying — so restart the local runtime
+#   (Xvfb + `orca serve`), not only the bridge.
+#   The current `orca serve` CLI accepts no relay arguments and does not parent a
+#   bridge, so the runtime and the bridge are supervised here as two independent
+#   tmux services. Restart only the component that failed.
 #   Never bounce remote / public proxy services from this script.
 #
 # Usage:
@@ -19,11 +22,13 @@ REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 
 RELAY_ENV="${ORCA_RELAY_ENV_FILE:-/root/.config/orca/orca-relay.env}"
 BRIDGE_PATH="${ORCA_RELAY_BRIDGE_PATH:-$REPO_ROOT/target/release/orca-relay-bridge}"
+CLI_BIN="${ORCA_CLI_BIN:-orca}"
 APP_ROOT="${ORCA_APP_ROOT:-/workspace/orca-repo}"
 USER_DATA_PATH="${ORCA_USER_DATA_PATH:-/root/.config/orca-dev}"
 RUNTIME_URL="${ORCA_RUNTIME_WS_URL:-ws://127.0.0.1:6768/}"
 RUNTIME_PORT="${ORCA_RUNTIME_PORT:-6768}"
 RUNTIME_SESSION="${ORCA_RUNTIME_TMUX_SESSION:-orca-server-relay}"
+BRIDGE_SESSION="${ORCA_BRIDGE_TMUX_SESSION:-orca-relay-bridge}"
 XVFB_SESSION="${ORCA_XVFB_TMUX_SESSION:-orca-xvfb}"
 DISPLAY_NUMBER="${ORCA_XVFB_DISPLAY:-:99}"
 MOBILE_PAIRING_ADDRESS="${ORCA_MOBILE_PAIRING_ADDRESS:-wss://<your-mobile-domain.example>/ws}"
@@ -33,6 +38,7 @@ HTTP_PROXY_URL="${ORCA_WATCHDOG_HTTP_PROXY:-${https_proxy:-${HTTPS_PROXY:-}}}"
 INTERVAL_SECONDS="${ORCA_WATCHDOG_INTERVAL_SECONDS:-15}"
 LOG_PATH="${ORCA_WATCHDOG_LOG_PATH:-/tmp/orca-relay-bridge-watchdog.log}"
 BRIDGE_LOG_PATH="${ORCA_WATCHDOG_BRIDGE_LOG_PATH:-/tmp/orca-relay-bridge.watchdog.log}"
+XVFB_LOG_PATH="${ORCA_WATCHDOG_XVFB_LOG_PATH:-/tmp/orca-relay-xvfb.watchdog.log}"
 PID_PATH="${ORCA_WATCHDOG_BRIDGE_PID_PATH:-/tmp/orca-relay-bridge.watchdog.pid}"
 STATE_PATH="${ORCA_WATCHDOG_STATE_PATH:-/tmp/orca-relay-bridge-watchdog.state}"
 # Soft-death thresholds: TCP can stay ESTAB while the relay session is wedged.
@@ -47,6 +53,8 @@ RUNTIME_REPAIR="${ORCA_WATCHDOG_RUNTIME_REPAIR:-1}"
 # Cooldown after a runtime restart to avoid thrash (seconds).
 RUNTIME_RESTART_COOLDOWN_S="${ORCA_WATCHDOG_RUNTIME_RESTART_COOLDOWN_S:-90}"
 RUNTIME_READY_TIMEOUT_S="${ORCA_WATCHDOG_RUNTIME_READY_TIMEOUT_S:-45}"
+# Bridge start attempts while waiting for a restarted runtime to become ready.
+BRIDGE_START_ATTEMPTS="${ORCA_WATCHDOG_BRIDGE_START_ATTEMPTS:-3}"
 MODE="once"
 JSON=0
 PREV_SENT=0
@@ -65,14 +73,18 @@ Usage:
   bash scripts/orca-relay-bridge-watchdog.sh [--once|--loop|--status] [--json]
 
 Env overrides:
-  ORCA_RELAY_ENV_FILE / ORCA_RELAY_BRIDGE_PATH / ORCA_APP_ROOT
+  ORCA_RELAY_ENV_FILE / ORCA_RELAY_BRIDGE_PATH / ORCA_CLI_BIN / ORCA_APP_ROOT
+  ORCA_APP_EXECUTABLE                       Electron binary used by `orca serve`
   ORCA_RUNTIME_WS_URL / ORCA_RUNTIME_PORT
-  ORCA_RUNTIME_TMUX_SESSION / ORCA_XVFB_TMUX_SESSION / ORCA_XVFB_DISPLAY
+  ORCA_RUNTIME_TMUX_SESSION / ORCA_BRIDGE_TMUX_SESSION
+  ORCA_XVFB_TMUX_SESSION / ORCA_XVFB_DISPLAY
   ORCA_MOBILE_PAIRING_ADDRESS / ORCA_USER_DATA_PATH
   ORCA_RELAY_HEALTH_URL / ORCA_WATCHDOG_HTTP_PROXY
   ORCA_WATCHDOG_INTERVAL_SECONDS
-  ORCA_WATCHDOG_RUNTIME_REPAIR              0 disables Electron restart
+  ORCA_WATCHDOG_RUNTIME_REPAIR              0 disables runtime restart
   ORCA_WATCHDOG_RUNTIME_RESTART_COOLDOWN_S  default 90
+  ORCA_WATCHDOG_BRIDGE_START_ATTEMPTS       default 3
+  ORCA_WATCHDOG_XVFB_LOG_PATH               Xvfb stderr capture for diagnosis
   ORCA_WATCHDOG_SOFT_DEATH_REPAIR           0 disables bridge soft-death restart
   ORCA_WATCHDOG_SENDQ_WARN / ORCA_WATCHDOG_SENDQ_CRIT
   ORCA_WATCHDOG_SENDQ_STREAK_RESTART / ORCA_WATCHDOG_STALL_STREAK_RESTART
@@ -117,6 +129,7 @@ done
 
 [[ -r "$RELAY_ENV" ]] || fail "relay env not readable: $RELAY_ENV"
 [[ -x "$BRIDGE_PATH" ]] || fail "bridge not executable: $BRIDGE_PATH"
+command -v "$CLI_BIN" >/dev/null 2>&1 || fail "Orca CLI not found: $CLI_BIN (set ORCA_CLI_BIN)"
 
 set -a
 # shellcheck disable=SC1090
@@ -127,10 +140,16 @@ set +a
 : "${ORCA_RELAY_TOKEN:?ORCA_RELAY_TOKEN missing from $RELAY_ENV}"
 
 resolve_electron() {
-  if [[ -n "${ORCA_ELECTRON_BIN:-}" && -x "${ORCA_ELECTRON_BIN}" ]]; then
-    printf '%s\n' "$ORCA_ELECTRON_BIN"
-    return 0
-  fi
+  local candidate
+  # `orca serve` needs an Electron binary. Honor an explicit operator override
+  # first, then the plain checkout layout, then a pnpm store layout.
+  for candidate in "${ORCA_APP_EXECUTABLE:-}" "${ORCA_ELECTRON_BIN:-}" \
+    "$APP_ROOT/node_modules/electron/dist/electron"; do
+    if [[ -n "$candidate" && -x "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
   find "$APP_ROOT/node_modules/.pnpm" -path '*/node_modules/electron/dist/electron' \
     -type f -perm -111 -print -quit 2>/dev/null
 }
@@ -155,14 +174,14 @@ electron_serve_pids() {
 }
 
 bridge_pids() {
-  # Match the actual bridge binary invocation, not Electron's --serve-relay-bridge-path arg
-  # and not this watchdog shell script itself.
+  # Match the actual bridge binary invocation, not an Electron argument that
+  # merely mentions the bridge path, and not this watchdog shell script itself.
   ps -eo pid=,args= | awk -v bridge="$BRIDGE_PATH" '
     $0 ~ bridge && /--relay-url/ && /--server-id/ && $0 !~ /electron/ && $0 !~ /watchdog/ { print $1 }
   '
 }
 
-bridge_connected_to_ali() {
+bridge_connected_to_relay() {
   local pid
   while read -r pid; do
     [[ -n "$pid" ]] || continue
@@ -244,19 +263,32 @@ stop_tmux_session() {
 
 ensure_xvfb() {
   local display_socket="/tmp/.X11-unix/X${DISPLAY_NUMBER#:}"
+  local launch_command
   if tmux has-session -t "$XVFB_SESSION" 2>/dev/null && [[ -S "$display_socket" ]]; then
     return 0
   fi
   stop_tmux_session "$XVFB_SESSION"
+  : >"$XVFB_LOG_PATH"
+  chmod 600 "$XVFB_LOG_PATH" 2>/dev/null || true
   log "starting Xvfb in tmux session $XVFB_SESSION ($DISPLAY_NUMBER)"
-  tmux new-session -d -s "$XVFB_SESSION" -- \
-    /usr/bin/Xvfb "$DISPLAY_NUMBER" -screen 0 1280x720x24 -nolisten tcp
-  local i
-  for i in $(seq 1 8); do
-    [[ -S "$display_socket" ]] && return 0
+  printf -v launch_command \
+    'exec /usr/bin/Xvfb %q -screen 0 1280x720x24 -nolisten tcp >>%q 2>&1' \
+    "$DISPLAY_NUMBER" "$XVFB_LOG_PATH"
+  tmux new-session -d -s "$XVFB_SESSION" "$launch_command"
+  for _ in $(seq 1 8); do
+    # A socket alone is not proof of a live server: a stale socket and lock file
+    # outlive a crashed Xvfb, and the replacement then refuses to start. Require
+    # the Xvfb we just launched to still be running.
+    if tmux has-session -t "$XVFB_SESSION" 2>/dev/null && [[ -S "$display_socket" ]]; then
+      return 0
+    fi
+    tmux has-session -t "$XVFB_SESSION" 2>/dev/null || break
     sleep 1
   done
-  log "ERROR: Xvfb did not create $display_socket"
+  log "ERROR: Xvfb did not stay up on $DISPLAY_NUMBER (socket=$display_socket)"
+  tail -n 20 "$XVFB_LOG_PATH" 2>/dev/null | while read -r line; do
+    log "xvfb-log: $line"
+  done || true
   return 1
 }
 
@@ -283,7 +315,8 @@ kill_stale_runtime() {
     done
   fi
 
-  # Bridge may still linger if Electron died uncleanly; TERM then KILL.
+  # The bridge is an independent service; stop it alongside the runtime so the
+  # pair restarts together instead of pointing at a dead runtime socket.
   while read -r pid; do
     [[ -n "$pid" ]] || continue
     kill -TERM "$pid" 2>/dev/null || true
@@ -300,6 +333,7 @@ kill_stale_runtime() {
     kill -KILL "$pid" 2>/dev/null || true
   done < <(bridge_pids)
 
+  stop_tmux_session "$BRIDGE_SESSION"
   stop_tmux_session "$RUNTIME_SESSION"
 
   for i in $(seq 1 10); do
@@ -314,16 +348,16 @@ kill_stale_runtime() {
 }
 
 wait_for_local_ready() {
-  local i
-  for i in $(seq 1 "$RUNTIME_READY_TIMEOUT_S"); do
-    if runtime_port_open && [[ -n "$(bridge_pids)" ]] && bridge_connected_to_ali; then
-      return 0
-    fi
-    # Bridge may take a moment after serve is up.
-    if runtime_port_open && [[ -n "$(bridge_pids)" ]]; then
-      sleep 1
-      if bridge_connected_to_ali || [[ "$i" -ge 8 ]]; then
-        # Accept runtime+bridge without :443 for a short window; soft-death path can fix later.
+  local bridge_attempts=0
+  for _ in $(seq 1 "$RUNTIME_READY_TIMEOUT_S"); do
+    if runtime_port_open; then
+      # Nothing else spawns the bridge for us, so start it here once the runtime
+      # socket is listening. Bounded attempts keep a broken bridge from looping.
+      if [[ -z "$(bridge_pids)" && "$bridge_attempts" -lt "$BRIDGE_START_ATTEMPTS" ]]; then
+        bridge_attempts=$((bridge_attempts + 1))
+        start_bridge || true
+      fi
+      if [[ -n "$(bridge_pids)" ]] && bridge_connected_to_relay; then
         return 0
       fi
     fi
@@ -363,18 +397,20 @@ restart_local_runtime() {
     return 1
   fi
 
-  log "runtime repair ($reason): restarting local Electron serve (session=$RUNTIME_SESSION, no remote proxy restart)"
+  log "runtime repair ($reason): restarting local headless serve (session=$RUNTIME_SESSION, no remote proxy restart)"
   kill_stale_runtime || true
   ensure_xvfb || return 1
 
   : >"$SERVE_LOG_PATH"
   chmod 600 "$SERVE_LOG_PATH" 2>/dev/null || true
 
+  # Current upstream removed the legacy --serve-relay-* Electron arguments, so
+  # start the supported `orca serve` CLI surface here. The relay identity is not
+  # needed by the runtime; the bridge is started separately by start_bridge.
   printf -v launch_command \
-    'set -a; source %q; set +a; exec env -u ELECTRON_RUN_AS_NODE DISPLAY=%q LIBGL_ALWAYS_SOFTWARE=1 ORCA_USER_DATA_PATH=%q %q --no-sandbox %q --serve --serve-port %q --serve-mobile-pairing --serve-pairing-address %q --serve-relay-url %q --serve-relay-server-id %q --serve-relay-bridge-path %q >>%q 2>&1' \
-    "$RELAY_ENV" "$DISPLAY_NUMBER" "$USER_DATA_PATH" "$electron_bin" "$APP_ROOT" \
-    "$RUNTIME_PORT" "$MOBILE_PAIRING_ADDRESS" "$ORCA_RELAY_URL" \
-    "$ORCA_RELAY_SERVER_ID" "$BRIDGE_PATH" "$SERVE_LOG_PATH"
+    'exec env -u ELECTRON_RUN_AS_NODE DISPLAY=%q LIBGL_ALWAYS_SOFTWARE=1 ORCA_USER_DATA_PATH=%q ORCA_APP_EXECUTABLE=%q ORCA_APP_EXECUTABLE_NEEDS_APP_ROOT=1 ORCA_APPIMAGE_NO_SANDBOX=1 %q serve --port %q --pairing-address %q --mobile-pairing --json >>%q 2>&1' \
+    "$DISPLAY_NUMBER" "$USER_DATA_PATH" "$electron_bin" "$CLI_BIN" \
+    "$RUNTIME_PORT" "$MOBILE_PAIRING_ADDRESS" "$SERVE_LOG_PATH"
 
   stop_tmux_session "$RUNTIME_SESSION"
   tmux new-session -d -s "$RUNTIME_SESSION" "$launch_command"
@@ -390,7 +426,7 @@ restart_local_runtime() {
     local epids bpids
     epids="$(electron_serve_pids | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
     bpids="$(bridge_pids | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
-    log "runtime repair ok: electron_pids=[$epids] bridge_pids=[$bpids]"
+    log "runtime repair ok: runtime_pids=[$epids] bridge_pids=[$bpids]"
     return 0
   fi
 
@@ -402,7 +438,7 @@ restart_local_runtime() {
 }
 
 start_bridge() {
-  # Prefer not to steal an Electron-managed bridge. Only start our own when none exist.
+  local launch_command pid
   if [[ -n "$(bridge_pids)" ]]; then
     return 0
   fi
@@ -410,24 +446,30 @@ start_bridge() {
     log "runtime :$RUNTIME_PORT is down; not starting bridge alone"
     return 1
   fi
+  if ! command -v tmux >/dev/null 2>&1; then
+    log "ERROR: cannot start bridge — tmux not found"
+    return 1
+  fi
   : >"$BRIDGE_LOG_PATH"
   chmod 600 "$BRIDGE_LOG_PATH" 2>/dev/null || true
-  nohup env \
-    ORCA_RELAY_TOKEN="$ORCA_RELAY_TOKEN" \
-    "$BRIDGE_PATH" \
-      --relay-url "$ORCA_RELAY_URL" \
-      --runtime-url "$RUNTIME_URL" \
-      --server-id "$ORCA_RELAY_SERVER_ID" \
-    >>"$BRIDGE_LOG_PATH" 2>&1 &
-  local pid=$!
-  echo "$pid" >"$PID_PATH"
-  chmod 600 "$PID_PATH" 2>/dev/null || true
+  stop_tmux_session "$BRIDGE_SESSION"
+  # Run the bridge as its own tmux service so it survives this watchdog process.
+  # The token is sourced from the env file inside the session, never passed as an
+  # argument, so it cannot appear in `ps` output.
+  printf -v launch_command \
+    'set -a; source %q; set +a; exec %q --relay-url %q --runtime-url %q --server-id %q >>%q 2>&1' \
+    "$RELAY_ENV" "$BRIDGE_PATH" "$ORCA_RELAY_URL" "$RUNTIME_URL" \
+    "$ORCA_RELAY_SERVER_ID" "$BRIDGE_LOG_PATH"
+  tmux new-session -d -s "$BRIDGE_SESSION" "$launch_command"
   sleep 1
-  if kill -0 "$pid" 2>/dev/null; then
-    log "started watchdog bridge pid=$pid server_id=$ORCA_RELAY_SERVER_ID"
+  pid="$(bridge_pids | head -n 1)"
+  if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+    echo "$pid" >"$PID_PATH"
+    chmod 600 "$PID_PATH" 2>/dev/null || true
+    log "started bridge tmux=$BRIDGE_SESSION pid=$pid server_id=$ORCA_RELAY_SERVER_ID"
     return 0
   fi
-  log "watchdog bridge pid=$pid exited immediately; see $BRIDGE_LOG_PATH"
+  log "bridge exited immediately; see $BRIDGE_LOG_PATH"
   return 1
 }
 
@@ -445,6 +487,7 @@ restart_bridge_pids() {
     [[ -n "$pid" ]] || continue
     kill -KILL "$pid" 2>/dev/null || true
   done < <(bridge_pids)
+  stop_tmux_session "$BRIDGE_SESSION"
   sleep 1
   PREV_SENT=0
   PREV_TS=0
@@ -452,26 +495,20 @@ restart_bridge_pids() {
   STALL_STREAK=0
   save_state
 
-  # If Electron is still up, prefer letting it respawn the bridge (sidecar).
-  # Give it a couple seconds, then fall back to our own bridge start.
-  sleep 2
-  if [[ -n "$(bridge_pids)" ]]; then
-    log "bridge respawned by parent after kill"
-    return 0
-  fi
+  # Nothing respawns the bridge for us; the watchdog owns its lifecycle.
   start_bridge
 }
 
 emit_status() {
   local pids runtime health connected count epids
-  local bpid sendq sent lastrcv unacked bconn
+  local sendq sent lastrcv unacked
   pids="$(bridge_pids | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
   epids="$(electron_serve_pids | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
   count="$(bridge_pids | wc -l | tr -d ' ')"
   runtime=0; runtime_port_open && runtime=1
   health=0; public_health_ok && health=1
-  connected=0; bridge_connected_to_ali && connected=1
-  read -r bpid sendq sent lastrcv unacked bconn <<<"$(bridge_tcp_stats)"
+  connected=0; bridge_connected_to_relay && connected=1
+  read -r _ sendq sent lastrcv unacked _ <<<"$(bridge_tcp_stats)"
   if [[ "$JSON" -eq 1 ]]; then
     printf '{"runtimePortOpen":%s,"electronPids":"%s","bridgeCount":%s,"bridgePids":"%s","bridgeConnected":%s,"publicHealthOk":%s,"serverId":"%s","sendq":%s,"bytesSent":%s,"lastrcvMs":%s,"unacked":%s,"sendqHighStreak":%s,"stallStreak":%s,"lastRuntimeRestartTs":%s}\n' \
       "$runtime" "$epids" "$count" "$pids" "$connected" "$health" "$ORCA_RELAY_SERVER_ID" \
@@ -485,13 +522,13 @@ emit_status() {
 
 repair_once() {
   local pids count
-  local bpid sendq sent lastrcv unacked bconn now delta_sent=0
+  local sendq sent lastrcv unacked now delta_sent=0
   load_state
   pids="$(bridge_pids || true)"
   count="$(bridge_pids | wc -l | tr -d ' ')"
   now="$(date +%s)"
 
-  # 1) Electron / runtime gone → restart full local serve (most common outage).
+  # 1) Runtime gone → restart full local serve (most common outage).
   if ! runtime_port_open; then
     if [[ "$RUNTIME_REPAIR" == "1" ]]; then
       restart_local_runtime "port_${RUNTIME_PORT}_down"
@@ -501,7 +538,7 @@ repair_once() {
     return 1
   fi
 
-  # 2) Runtime up but bridge missing → start bridge (or let sidecar; we start if needed).
+  # 2) Runtime up but bridge missing → start the bridge service.
   if [[ "$count" -eq 0 ]]; then
     log "bridge missing while runtime up; starting local bridge"
     start_bridge
@@ -509,7 +546,7 @@ repair_once() {
   fi
 
   # 3) Bridge process exists but no public socket — half-open / soft-death.
-  if ! bridge_connected_to_ali; then
+  if ! bridge_connected_to_relay; then
     if [[ "$SOFT_DEATH_REPAIR" == "1" ]]; then
       restart_bridge_pids "no_443_socket"
       return $?
@@ -518,7 +555,7 @@ repair_once() {
     return 1
   fi
 
-  read -r bpid sendq sent lastrcv unacked bconn <<<"$(bridge_tcp_stats)"
+  read -r _ sendq sent lastrcv unacked _ <<<"$(bridge_tcp_stats)"
   if [[ "${PREV_TS:-0}" -gt 0 && "$now" -gt "$PREV_TS" && "$sent" -ge "${PREV_SENT:-0}" ]]; then
     delta_sent=$((sent - PREV_SENT))
   fi

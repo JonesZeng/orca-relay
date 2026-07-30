@@ -159,8 +159,23 @@ tar -xzf "orca-relay-v0.1.0-$TARGET.tar.gz"
 
 The VPS installer below uses the same release asset naming by default. Set `ORCA_RELAY_GITHUB_REPO=JonesZeng/orca-relay` only if you need to be explicit; it is already the installer default.
 
-
 ## VPS deployment
+
+### Deploy with an agent
+
+`skills/deploy-orca-relay/SKILL.md` is a self-contained deployment runbook written for a coding agent: it interviews you for the missing facts, picks a topology based on whether you own a domain, installs the VPS relay, brings up the bridge and proxy, rewrites the pairing code, and finishes by installing the local stability layer. Every phase ends in a verification gate the agent must show you.
+
+Install it wherever your agent loads skills from — for example `.claude/skills/deploy-orca-relay/SKILL.md`, `.agents/skills/deploy-orca-relay/SKILL.md`, or `~/.agents/skills/deploy-orca-relay/SKILL.md`. If your agent has no skill mechanism, paste this prompt instead:
+
+```text
+Read skills/deploy-orca-relay/SKILL.md from the orca-relay repository and deploy Orca Relay for me.
+I have a Linux VPS (ssh host: <vps-host>) and <a domain: your-relay-domain.example | no domain>.
+My Orca runtime runs on <runtime-host> port <orca-runtime-port>; Orca CLI runs on <client-host>.
+Interview me for anything missing, run the installer's `render` preview before any mutating
+install, stop at every verification gate and show me the output, and never print the relay token.
+```
+
+The manual paths below are what that skill drives, and remain the reference if you would rather run each step yourself.
 
 ### One-command installer
 
@@ -349,7 +364,8 @@ Support scripts:
 | `scripts/compare-cloudflare-relay-latency.sh` | Runs grey-vs-orange latency probes by composing the two scripts above. |
 | `scripts/test_support_scripts.py` | Local checks for frame construction, token redaction, and helper script safety. |
 | `scripts/orca-relay-soft-death-probe.sh` | Evidence-only soft-death probe. Samples TCP Send-Q / bytes / lastrcv and freezes local+remote snapshots on warn/crit. Never restarts services. |
-| `scripts/orca-relay-bridge-watchdog.sh` | Local connectivity watchdog. Restarts headless Electron serve and/or the bridge when the path is dead or soft-wedged. Does **not** bounce remote/public proxies. |
+| `scripts/orca-relay-bridge-watchdog.sh` | Local connectivity watchdog. Restarts the headless `orca serve` runtime and/or the bridge when the path is dead or soft-wedged. Does **not** bounce remote/public proxies. |
+| `scripts/orca-relay-watchdog-daemon.sh` | Detached singleton supervisor for the watchdog loop. Uses `setsid` plus an `flock` lock so the loop survives terminal/tmux/SSH exit and cannot double-start. |
 | `scripts/restart-orca-relay-mobile.sh` | Full operator restart: remote relay/proxy units + local Xvfb/Electron serve + pairing-code refresh + public health/WS checks. |
 
 ### Soft-death probe and local watchdog
@@ -365,6 +381,11 @@ bash scripts/orca-relay-soft-death-probe.sh --loop
 bash scripts/orca-relay-bridge-watchdog.sh --status --json
 bash scripts/orca-relay-bridge-watchdog.sh --loop
 
+# Same loop, detached and single-instance (survives terminal/tmux exit)
+bash scripts/orca-relay-watchdog-daemon.sh start
+bash scripts/orca-relay-watchdog-daemon.sh status
+bash scripts/orca-relay-watchdog-daemon.sh stop
+
 # Full manual restart of remote proxies + local runtime
 bash scripts/restart-orca-relay-mobile.sh
 ```
@@ -372,8 +393,10 @@ bash scripts/restart-orca-relay-mobile.sh
 Recommended operator split:
 
 1. Keep `orca-relay-soft-death-probe.sh --loop` for evidence capture.
-2. Keep `orca-relay-bridge-watchdog.sh --loop` for local auto-repair (runtime/bridge only).
+2. Keep `orca-relay-bridge-watchdog.sh --loop` for local auto-repair (runtime/bridge only), started through `orca-relay-watchdog-daemon.sh start` for anything unattended.
 3. Use `restart-orca-relay-mobile.sh` only when you intentionally want to bounce the remote path too.
+
+The current `orca serve` CLI accepts no relay arguments and does not parent a bridge, so the watchdog supervises the runtime and the bridge as two independent tmux services (`orca-server-relay` and `orca-relay-bridge` by default) and restarts only the one that failed.
 
 All three scripts read the persisted relay identity from `ORCA_RELAY_ENV_FILE` (default `/root/.config/orca/orca-relay.env`) and accept `ORCA_*` overrides for bridge path, health URL, remote host, and thresholds. Defaults point at local development paths such as `target/release/orca-relay-bridge` and placeholders like `https://<your-relay-domain.example>/health`.
 
@@ -460,7 +483,11 @@ orca-relay/
 │   ├── test_support_scripts.py
 │   ├── orca-relay-soft-death-probe.sh
 │   ├── orca-relay-bridge-watchdog.sh
+│   ├── orca-relay-watchdog-daemon.sh
 │   └── restart-orca-relay-mobile.sh
+├── skills/
+│   └── deploy-orca-relay/
+│       └── SKILL.md
 └── assets/
     ├── README.md
     └── prompts/
@@ -473,5 +500,6 @@ orca-relay/
 | `src/bin/orca-relay-proxy.rs` | Remote-side local proxy CLI. |
 | `src/bin/orca-relay-bridge.rs` | Runtime-side bridge CLI. |
 | `scripts/` | Deployment templates, one-command VPS installer, and operations helpers. |
+| `skills/deploy-orca-relay/SKILL.md` | Agent-executable deployment runbook for VPS operators, with or without their own domain. |
 | `tests/` | Relay, adapter, and pairing-code contract tests. |
 | `assets/prompts/` | Public-safe image-generation prompts for README diagrams. |

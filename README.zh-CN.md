@@ -165,7 +165,9 @@ tar -xzf "orca-relay-v0.1.0-$TARGET.tar.gz"
 
 `skills/deploy-orca-relay/SKILL.md` 是一份写给 coding agent 的自包含部署 runbook：它会先把缺失信息问清楚，根据你有没有自己的域名选择拓扑，然后依次完成 VPS 中继安装、bridge 与 proxy 启动、配对码改写，最后装上本地稳定性层。每个阶段都有验证关卡，agent 必须把输出给你看过才能继续。
 
-把它放到你的 agent 加载技能的位置即可，例如 `.claude/skills/deploy-orca-relay/SKILL.md`、`.agents/skills/deploy-orca-relay/SKILL.md` 或 `~/.agents/skills/deploy-orca-relay/SKILL.md`。如果你的 agent 没有技能机制，直接贴这段 prompt：
+`skills/configure-orca-relay-clients/SKILL.md` 是面向新用户完整路径的后续 runbook：开发机 `orca serve` + bridge、个人 VPS 中继/公网 proxy，以及只靠配对码接入的 Win / Mac / Mobile 客户端。当「VPS 已装好」还不够、agent 仍不清楚客户端怎么配对时，用这份技能。
+
+把技能放到你的 agent 加载位置即可，例如 `.claude/skills/<name>/SKILL.md`、`.agents/skills/<name>/SKILL.md` 或 `~/.agents/skills/<name>/SKILL.md`。如果你的 agent 没有技能机制，直接贴下面其中一段 prompt：
 
 ```text
 读取 orca-relay 仓库里的 skills/deploy-orca-relay/SKILL.md，然后帮我部署 Orca Relay。
@@ -173,6 +175,16 @@ tar -xzf "orca-relay-v0.1.0-$TARGET.tar.gz"
 Orca runtime 跑在 <runtime-host> 的 <orca-runtime-port> 端口，Orca CLI 跑在 <client-host>。
 缺什么信息先问我；任何会写入系统的安装之前先跑安装器的 `render` 预览；
 每个验证关卡都停下来把输出给我看；任何情况下都不要把 relay token 打印出来。
+```
+
+```text
+读取 skills/configure-orca-relay-clients/SKILL.md 和 skills/deploy-orca-relay/SKILL.md。
+按这条路径配置：开发机 Orca server + orca-relay-bridge → 个人 VPS orca-relay
+→ Win/Mac/Mobile 用配对码接入。
+已知信息：VPS ssh=<vps-host>，域名=<your-relay-domain.example>，runtime 主机=<runtime-host>，
+runtime 端口=<orca-runtime-port>，客户端=<mobile|mac|win|cli>。
+缺什么先问我；任何情况下都不要打印 ORCA_RELAY_TOKEN 或完整配对码；
+每个验证关卡都停下来，只展示脱敏后的证据。
 ```
 
 下面的手工步骤就是这个技能实际驱动的流程，你也可以照着自己一步步做。
@@ -486,7 +498,9 @@ orca-relay/
 │   ├── orca-relay-watchdog-daemon.sh
 │   └── restart-orca-relay-mobile.sh
 ├── skills/
-│   └── deploy-orca-relay/
+│   ├── deploy-orca-relay/
+│   │   └── SKILL.md
+│   └── configure-orca-relay-clients/
 │       └── SKILL.md
 └── assets/
     ├── README.md
@@ -501,5 +515,6 @@ orca-relay/
 | `src/bin/orca-relay-bridge.rs` | Runtime 侧桥接 CLI。 |
 | `scripts/` | 部署模板、一键 VPS 安装器和运维脚本。 |
 | `skills/deploy-orca-relay/SKILL.md` | 给 VPS 运维者（有域名或没有域名都适用）的 agent 可执行部署 runbook。 |
+| `skills/configure-orca-relay-clients/SKILL.md` | 开发机 runtime + 个人 VPS + Win/Mac/Mobile 配对码客户端的 agent runbook。 |
 | `tests/` | Relay、adapter、配对码契约测试。 |
 | `assets/prompts/` | README 图像生成 prompts。 |

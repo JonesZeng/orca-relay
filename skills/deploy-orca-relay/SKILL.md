@@ -21,6 +21,11 @@ Work in phases. Each phase ends with a verification gate. **Do not start a phase
 until the previous gate passed.** If a gate fails, fix that layer before moving
 on; do not compensate downstream.
 
+If the operator also needs Win/Mac/Mobile pairing-code clients (not only VPS
+install + one CLI proxy), continue with
+`skills/configure-orca-relay-clients/SKILL.md` after Gate 3. That skill covers
+public proxies, `orca serve` pairing scopes, and per-platform client steps.
+
 ## Phase 0 — Interview, then plan
 
 Ask the operator these questions before running anything. Do not guess.

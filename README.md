@@ -165,7 +165,9 @@ The VPS installer below uses the same release asset naming by default. Set `ORCA
 
 `skills/deploy-orca-relay/SKILL.md` is a self-contained deployment runbook written for a coding agent: it interviews you for the missing facts, picks a topology based on whether you own a domain, installs the VPS relay, brings up the bridge and proxy, rewrites the pairing code, and finishes by installing the local stability layer. Every phase ends in a verification gate the agent must show you.
 
-Install it wherever your agent loads skills from — for example `.claude/skills/deploy-orca-relay/SKILL.md`, `.agents/skills/deploy-orca-relay/SKILL.md`, or `~/.agents/skills/deploy-orca-relay/SKILL.md`. If your agent has no skill mechanism, paste this prompt instead:
+`skills/configure-orca-relay-clients/SKILL.md` is the follow-on runbook for the full new-user path: development-host `orca serve` + bridge, personal VPS relay/public proxy, then Win / Mac / Mobile clients that only need a pairing code. Use it when “VPS is up” is not enough and agents still need clear client pairing steps.
+
+Install either skill wherever your agent loads skills from — for example `.claude/skills/<name>/SKILL.md`, `.agents/skills/<name>/SKILL.md`, or `~/.agents/skills/<name>/SKILL.md`. If your agent has no skill mechanism, paste one of these prompts instead:
 
 ```text
 Read skills/deploy-orca-relay/SKILL.md from the orca-relay repository and deploy Orca Relay for me.
@@ -175,7 +177,17 @@ Interview me for anything missing, run the installer's `render` preview before a
 install, stop at every verification gate and show me the output, and never print the relay token.
 ```
 
-The manual paths below are what that skill drives, and remain the reference if you would rather run each step yourself.
+```text
+Read skills/configure-orca-relay-clients/SKILL.md and skills/deploy-orca-relay/SKILL.md.
+Configure: development host Orca server + orca-relay-bridge → personal VPS orca-relay
+→ Win/Mac/Mobile clients via pairing codes.
+Facts: VPS ssh=<vps-host>, domain=<your-relay-domain.example>, runtime host=<runtime-host>,
+runtime port=<orca-runtime-port>, clients=<mobile|mac|win|cli>.
+Interview me for anything missing. Never print ORCA_RELAY_TOKEN or full pairing codes.
+Stop at every gate and show redacted evidence.
+```
+
+The manual paths below are what those skills drive, and remain the reference if you would rather run each step yourself.
 
 ### One-command installer
 
@@ -486,7 +498,9 @@ orca-relay/
 │   ├── orca-relay-watchdog-daemon.sh
 │   └── restart-orca-relay-mobile.sh
 ├── skills/
-│   └── deploy-orca-relay/
+│   ├── deploy-orca-relay/
+│   │   └── SKILL.md
+│   └── configure-orca-relay-clients/
 │       └── SKILL.md
 └── assets/
     ├── README.md
@@ -501,5 +515,6 @@ orca-relay/
 | `src/bin/orca-relay-bridge.rs` | Runtime-side bridge CLI. |
 | `scripts/` | Deployment templates, one-command VPS installer, and operations helpers. |
 | `skills/deploy-orca-relay/SKILL.md` | Agent-executable deployment runbook for VPS operators, with or without their own domain. |
+| `skills/configure-orca-relay-clients/SKILL.md` | Agent runbook for development-host runtime + personal VPS + Win/Mac/Mobile pairing-code clients. |
 | `tests/` | Relay, adapter, and pairing-code contract tests. |
 | `assets/prompts/` | Public-safe image-generation prompts for README diagrams. |

@@ -24,6 +24,7 @@
 - `scripts/orca-relay-watchdog-daemon.sh`: detached singleton supervisor (`setsid` + `flock`) for the watchdog loop, so unattended repair survives terminal/tmux/SSH exit.
 - `scripts/restart-orca-relay-mobile.sh`: full operator restart for remote relay/proxy units plus local Xvfb/Electron serve and public health checks.
 - `skills/deploy-orca-relay/SKILL.md`: agent-executable deployment runbook for VPS operators with or without their own domain. Keep it consistent with the installer flags, script names, and secret rules that actually exist.
+- `skills/configure-orca-relay-clients/SKILL.md`: agent runbook for the full new-user path — development-host `orca serve` + bridge, personal VPS relay/public proxy, and Win/Mac/Mobile pairing-code clients. Use after or together with deploy-orca-relay when clients still need pairing guidance.
 
 ## Safe development rules
 
@@ -123,6 +124,10 @@ cargo run --bin orca-relay -- rewrite-pairing-code \
 ```
 
 Supported input shapes are bare URL-safe base64 pairing payloads, `orca://pair?...` links, and Orca Desktop browser URLs containing `#pairing=`.
+
+### New-user agent path (runtime + VPS + clients)
+
+When an operator needs the full path — development-server Orca runtime and bridge, personal VPS relay, then Win/Mac/Mobile pairing — follow `skills/configure-orca-relay-clients/SKILL.md`. That skill assumes the VPS install rules in `skills/deploy-orca-relay/SKILL.md` and adds client-facing gates agents must not skip.
 
 ## Release maintenance
 

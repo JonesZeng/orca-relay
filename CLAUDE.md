@@ -23,6 +23,7 @@
 - `tests/pairing_code.rs`: endpoint-only pairing-code rewrites and invalid-input rejection.
 - `scripts/`: VPS installer, systemd/Caddy/env templates, latency helpers, soft-death probe, local watchdog, detached watchdog supervisor, full restart helper, and script safety checks.
 - `skills/deploy-orca-relay/SKILL.md`: agent-executable deployment runbook for VPS operators with or without their own domain.
+- `skills/configure-orca-relay-clients/SKILL.md`: agent runbook for development-host `orca serve` + bridge, personal VPS, and Win/Mac/Mobile pairing-code clients.
 - `assets/README.md` and `assets/prompts/`: public-safe image-generation prompts and expected image paths.
 
 ## Claude Development Workflow

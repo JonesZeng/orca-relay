@@ -1,0 +1,24 @@
+{
+  "name": "orca-runtime-relay",
+  "main": "../mobile-direct/src/worker.mjs",
+  "compatibility_date": "2026-09-22",
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "RELAY_SESSIONS",
+        "class_name": "RuntimeRelayDO"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "RuntimeRelayDO"
+      ]
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}
